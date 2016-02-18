@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 import frappe
 import frappe.utils
 import json
-from jinja2 import TemplateSyntaxError
+from frappe.utils.jinja import validate_template
 
 from frappe.model.document import Document
 
@@ -24,12 +24,7 @@ class PrintFormat(Document):
 		self.extract_images()
 
 		if self.html:
-			jenv = frappe.get_jenv()
-			try:
-				jenv.from_string(self.html)
-			except TemplateSyntaxError, e:
-				frappe.msgprint('Line {}: {}'.format(e.lineno, e.message))
-				frappe.throw(frappe._("Syntax error in Jinja template"))
+			validate_template(self.html)
 
 	def extract_images(self):
 		from frappe.utils.file_manager import extract_images_from_html
@@ -62,15 +57,23 @@ class PrintFormat(Document):
 
 @frappe.whitelist()
 def make_default(name):
+	"""Set print format as default"""
 	frappe.has_permission("Print Format", "write")
 
 	print_format = frappe.get_doc("Print Format", name)
 
-	frappe.make_property_setter({
-		'doctype_or_field': "DocType",
-		'doctype': print_format.doc_type,
-		'property': "default_print_format",
-		'value': name,
-	})
+	if (frappe.conf.get('developer_mode') or 0) == 1:
+		# developer mode, set it default in doctype
+		doctype = frappe.get_doc("DocType", print_format.doc_type)
+		doctype.default_print_format = name
+		doctype.save()
+	else:
+		# customization
+		frappe.make_property_setter({
+			'doctype_or_field': "DocType",
+			'doctype': print_format.doc_type,
+			'property': "default_print_format",
+			'value': name,
+		})
 
 	frappe.msgprint(frappe._("Done"))

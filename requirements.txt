@@ -11,7 +11,6 @@ python-geoip
 python-dateutil
 pytz
 six
-slugify
 termcolor
 werkzeug
 semantic_version
@@ -20,7 +19,7 @@ requests
 celery
 redis
 selenium
-pdfkit
+-e git+https://github.com/frappe/python-pdfkit.git#egg=pdfkit
 babel
 ipython
 html2text
@@ -29,4 +28,5 @@ click
 num2words
 watchdog==0.8.0
 bleach
-
+Pillow
+beautifulsoup4

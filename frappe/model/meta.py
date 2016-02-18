@@ -102,6 +102,18 @@ class Meta(Document):
 	def get_options(self, fieldname):
 		return self.get_field(fieldname).options
 
+	def get_link_doctype(self, fieldname):
+		df = self.get_field(fieldname)
+
+		if df.fieldtype == "Link":
+			return df.options
+
+		elif df.fieldtype == "Dynamic Link":
+			return self.get_options(df.options)
+
+		else:
+			return None
+
 	def get_search_fields(self):
 		search_fields = self.search_fields or "name"
 		search_fields = [d.strip() for d in search_fields.split(",")]
@@ -116,6 +128,9 @@ class Meta(Document):
 		if self.title_field and self.title_field not in list_fields:
 			list_fields.append(self.title_field)
 		return list_fields
+
+	def get_custom_fields(self):
+		return [d for d in self.fields if d.get('is_custom_field')]
 
 	def get_title_field(self):
 		return self.title_field or "name"
@@ -164,42 +179,26 @@ class Meta(Document):
 
 	def sort_fields(self):
 		"""sort on basis of previous_field"""
-		newlist = []
-		pending = self.get("fields")
-
 		if self.get("_idx"):
+			newlist = []
+			pending = self.get("fields")
+
 			for fieldname in json.loads(self.get("_idx")):
 				d = self.get("fields", {"fieldname": fieldname}, limit=1)
 				if d:
 					newlist.append(d[0])
 					pending.remove(d[0])
-		else:
-			maxloops = 20
-			while (pending and maxloops>0):
-				maxloops -= 1
-				for d in pending[:]:
-					if d.get("previous_field"):
-						# field already added
-						for n in newlist:
-							if n.fieldname==d.previous_field:
-								newlist.insert(newlist.index(n)+1, d)
-								pending.remove(d)
-								break
-					else:
-						newlist.append(d)
-						pending.remove(d)
 
-		# recurring at end
-		if pending:
-			newlist += pending
+			if pending:
+				newlist += pending
 
-		# renum
-		idx = 1
-		for d in newlist:
-			d.idx = idx
-			idx += 1
+			# renum
+			idx = 1
+			for d in newlist:
+				d.idx = idx
+				idx += 1
 
-		self.set("fields", newlist)
+			self.set("fields", newlist)
 
 	def get_fields_to_check_permissions(self, user_permission_doctypes):
 		fields = self.get("fields", {
@@ -260,15 +259,24 @@ def get_field_currency(df, doc=None):
 	if not doc:
 		return None
 
-	if ":" in cstr(df.get("options")):
-		split_opts = df.get("options").split(":")
-		if len(split_opts)==3:
-			currency = frappe.db.get_value(split_opts[0], doc.get(split_opts[1]),
-				split_opts[2])
-	else:
-		currency = doc.get(df.get("options"))
+	if not getattr(frappe.local, "field_currency", None):
+		frappe.local.field_currency = frappe._dict()
 
-	return currency
+	if not frappe.local.field_currency.get((doc.doctype, doc.parent or doc.name), {}).get(df.fieldname):
+		if ":" in cstr(df.get("options")):
+			split_opts = df.get("options").split(":")
+			if len(split_opts)==3:
+				currency = frappe.db.get_value(split_opts[0], doc.get(split_opts[1]), split_opts[2])
+		else:
+			currency = doc.get(df.get("options"))
+			if not currency and doc.parent:
+				currency = frappe.db.get_value(doc.parenttype, doc.parent, df.get("options"))
+
+		if currency:
+			frappe.local.field_currency.setdefault((doc.doctype, doc.parent or doc.name), frappe._dict())\
+				.setdefault(df.fieldname, currency)
+
+	return frappe.local.field_currency.get((doc.doctype, doc.parent or doc.name), {}).get(df.fieldname)
 
 def get_field_precision(df, doc=None, currency=None):
 	"""get precision based on DocField options and fieldvalue in doc"""
@@ -362,4 +370,3 @@ def clear_cache(doctype=None):
 		# clear all
 		for name in groups:
 			cache.delete_value(name)
-

@@ -4,6 +4,7 @@
 from __future__ import unicode_literals
 
 import re
+import MySQLdb
 import frappe
 from frappe import _
 
@@ -37,6 +38,15 @@ class DocType(Document):
 		for c in [".", "/", "#", "&", "=", ":", "'", '"']:
 			if c in self.name:
 				frappe.throw(_("{0} not allowed in name").format(c))
+
+		if self.issingle:
+			self.allow_import = 0
+			self.is_submittable = 0
+			self.istable = 0
+
+		elif self.istable:
+			self.allow_import = 0
+
 		self.validate_series()
 		self.scrub_field_names()
 		self.validate_document_type()
@@ -87,6 +97,9 @@ class DocType(Document):
 					else:
 						d.fieldname = d.fieldtype.lower().replace(" ","_") + "_" + str(d.idx)
 
+				# fieldnames should be lowercase
+				d.fieldname = d.fieldname.lower()
+
 	def validate_series(self, autoname=None, name=None):
 		"""Validate if `autoname` property is correctly set."""
 		if not autoname: autoname = self.autoname
@@ -108,7 +121,7 @@ class DocType(Document):
 	def on_update(self):
 		"""Update database schema, make controller templates if `custom` is not set and clear cache."""
 		from frappe.model.db_schema import updatedb
-		updatedb(self.name)
+		updatedb(self.name, self)
 
 		self.change_modified_of_parent()
 		make_module_and_roles(self)
@@ -191,7 +204,10 @@ class DocType(Document):
 		make_boilerplate("controller.py", self)
 
 		if not (self.istable or self.issingle):
-			make_boilerplate("test_controller.py", self)
+			make_boilerplate("test_controller.py", self.as_dict())
+
+		if not self.istable:
+			make_boilerplate("controller.js", self.as_dict())
 
 	def make_amendable(self):
 		"""If is_submittable is set, add amended_from docfields."""
@@ -271,7 +287,7 @@ def validate_fields(meta):
 			frappe.throw(_("Max width for type Currency is 100px in row {0}").format(d.idx))
 
 	def check_in_list_view(d):
-		if d.in_list_view and d.fieldtype!="Image" and (d.fieldtype in no_value_fields):
+		if d.in_list_view and (d.fieldtype in no_value_fields):
 			frappe.throw(_("'In List View' not allowed for type {0} in row {1}").format(d.fieldtype, d.idx))
 
 	def check_dynamic_link_options(d):
@@ -292,16 +308,32 @@ def validate_fields(meta):
 			frappe.throw(_("Precision should be between 1 and 6"))
 
 	def check_unique_and_text(d):
+		if meta.issingle:
+			d.unique = 0
+			d.search_index = 0
+
 		if getattr(d, "unique", False):
 			if d.fieldtype not in ("Data", "Link", "Read Only"):
 				frappe.throw(_("Fieldtype {0} for {1} cannot be unique").format(d.fieldtype, d.label))
 
-			has_non_unique_values = frappe.db.sql("""select `{fieldname}`, count(*)
-				from `tab{doctype}` group by `{fieldname}` having count(*) > 1 limit 1""".format(
-				doctype=d.parent, fieldname=d.fieldname))
+			if not d.get("__islocal"):
+				try:
+					has_non_unique_values = frappe.db.sql("""select `{fieldname}`, count(*)
+						from `tab{doctype}` group by `{fieldname}` having count(*) > 1 limit 1""".format(
+						doctype=d.parent, fieldname=d.fieldname))
 
-			if has_non_unique_values and has_non_unique_values[0][0]:
-				frappe.throw(_("Field '{0}' cannot be set as Unique as it has non-unique values").format(d.label))
+				except MySQLdb.OperationalError, e:
+					if e.args and e.args[0]==1054:
+						# ignore if missing column, else raise
+						# this happens in case of Custom Field
+						pass
+					else:
+						raise
+
+				else:
+					# else of try block
+					if has_non_unique_values and has_non_unique_values[0][0]:
+						frappe.throw(_("Field '{0}' cannot be set as Unique as it has non-unique values").format(d.label))
 
 		if d.search_index and d.fieldtype in ("Text", "Long Text", "Small Text", "Code", "Text Editor"):
 			frappe.throw(_("Fieldtype {0} for {1} cannot be indexed").format(d.fieldtype, d.label))
@@ -359,6 +391,19 @@ def validate_fields(meta):
 			_validate_title_field_pattern(df.options)
 			_validate_title_field_pattern(df.default)
 
+	def check_timeline_field(meta):
+		if not meta.timeline_field:
+			return
+
+		fieldname_list = [d.fieldname for d in fields]
+
+		if meta.timeline_field not in fieldname_list:
+			frappe.throw(_("Timeline field must be a valid fieldname"), InvalidFieldNameError)
+
+		df = meta.get("fields", {"fieldname": meta.timeline_field})[0]
+		if df.fieldtype not in ("Link", "Dynamic Link"):
+			frappe.throw(_("Timeline field must be a Link or Dynamic Link"), InvalidFieldNameError)
+
 	fields = meta.get("fields")
 	for d in fields:
 		if not d.permlevel: d.permlevel = 0
@@ -378,6 +423,7 @@ def validate_fields(meta):
 	check_fold(fields)
 	check_search_fields(meta)
 	check_title_field(meta)
+	check_timeline_field(meta)
 
 def validate_permissions_for_doctype(doctype, for_remove=False):
 	"""Validates if permissions are set correctly."""

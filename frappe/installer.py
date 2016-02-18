@@ -101,7 +101,7 @@ def install_app(name, verbose=False, set_as_patched=True):
 	frappe.flags.in_install = name
 	frappe.clear_cache()
 
-	if name not in frappe.get_all_apps(with_frappe=True):
+	if name not in frappe.get_all_apps():
 		raise Exception("App not in apps.txt")
 
 	if name in installed_apps:
@@ -114,7 +114,9 @@ def install_app(name, verbose=False, set_as_patched=True):
 		frappe.only_for("System Manager")
 
 	for before_install in app_hooks.before_install or []:
-		frappe.get_attr(before_install)()
+		out = frappe.get_attr(before_install)()
+		if out==False:
+			return
 
 	if name != "frappe":
 		add_module_defs(name)
@@ -197,7 +199,7 @@ def set_all_patches_as_completed(app):
 			frappe.get_doc({
 				"doctype": "Patch Log",
 				"patch": patch
-			}).insert()
+			}).insert(ignore_permissions=True)
 		frappe.db.commit()
 
 def init_singles():
@@ -273,6 +275,7 @@ def make_site_dirs():
 	for dir_path in (
 			os.path.join(site_private_path, 'backups'),
 			os.path.join(site_public_path, 'files'),
+			os.path.join(site_private_path, 'files'),
 			os.path.join(frappe.local.site_path, 'task-logs')):
 		if not os.path.exists(dir_path):
 			os.makedirs(dir_path)

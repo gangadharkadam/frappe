@@ -2,32 +2,10 @@ from __future__ import unicode_literals
 app_name = "frappe"
 app_title = "Frappe Framework"
 app_publisher = "Frappe Technologies Pvt. Ltd."
-app_short_description = "Full stack web framework with Python, Javascript, MariaDB, Redis, Node"
-app_description = """## Frappe Framework
-
-Frappe is a full stack web application framework written in Python,
-Javascript, HTML/CSS with MySQL as the backend. It was built for ERPNext
-but is pretty generic and can be used to build database driven apps.
-
-The key differece in Frappe compared to other frameworks is that Frappe
-is that meta-data is also treated as data and is used to build front-ends
-very easily. Frappe comes with a full blown admin UI called the **Desk**
-that handles forms, navigation, lists, menus, permissions, file attachment
-and much more out of the box.
-
-Frappe also has a plug-in architecture that can be used to build plugins
-to ERPNext.
-
-### Links:
-
-- Project Home: [https://frappe.io](https://frappe.io)
-- Tutorial: [https://frappe.io/tutorial](https://frappe.io/tutorial)
-- GitHub: [https://github.com/frappe/frappe](https://github.com/frappe/frappe)
-- Forum: [https://discuss.erpnext.com](https://discuss.erpnext.com)
-"""
+app_description = "Full stack web framework with Python, Javascript, MariaDB, Redis, Node"
 
 app_icon = "octicon octicon-circuit-board"
-app_version = "6.9.3"
+app_version = "6.23.1"
 app_color = "orange"
 source_link = "https://github.com/frappe/frappe"
 app_license = "MIT"
@@ -67,12 +45,6 @@ website_route_rules = [
 	{"from_route": "/blog/<category>", "to_route": "Blog Post"}
 ]
 
-website_context = {
-	"hero": {
-		"blog": "templates/includes/blog/hero.html"
-	}
-}
-
 write_file_keys = ["file_url", "file_name"]
 
 notification_config = "frappe.core.notifications.get_notification_config"
@@ -88,7 +60,7 @@ calendars = ["Event"]
 # login
 
 on_session_creation = [
-	"frappe.desk.doctype.feed.feed.login_feed",
+	"frappe.core.doctype.communication.feed.login_feed",
 	"frappe.core.doctype.user.user.notifify_admin_access_to_system_manager"
 ]
 
@@ -98,16 +70,15 @@ permission_query_conditions = {
 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
 	"ToDo": "frappe.desk.doctype.todo.todo.get_permission_query_conditions",
 	"User": "frappe.core.doctype.user.user.get_permission_query_conditions",
-	"Feed": "frappe.desk.doctype.feed.feed.get_permission_query_conditions",
-	"Note": "frappe.desk.doctype.note.note.get_permission_query_conditions"
+	"Note": "frappe.desk.doctype.note.note.get_permission_query_conditions",
 }
 
 has_permission = {
 	"Event": "frappe.desk.doctype.event.event.has_permission",
 	"ToDo": "frappe.desk.doctype.todo.todo.has_permission",
 	"User": "frappe.core.doctype.user.user.has_permission",
-	"Feed": "frappe.desk.doctype.feed.feed.has_permission",
-	"Note": "frappe.desk.doctype.note.note.has_permission"
+	"Note": "frappe.desk.doctype.note.note.has_permission",
+	"Communication": "frappe.core.doctype.communication.communication.has_permission"
 }
 
 standard_queries = {
@@ -121,12 +92,11 @@ doc_events = {
 		"on_update": [
 			"frappe.desk.notifications.clear_doctype_notifications",
 			"frappe.email.doctype.email_alert.email_alert.trigger_email_alerts",
-			"frappe.desk.doctype.feed.feed.update_feed"
+			"frappe.core.doctype.communication.feed.update_feed"
 		],
 		"after_rename": "frappe.desk.notifications.clear_doctype_notifications",
 		"on_submit": [
 			"frappe.email.doctype.email_alert.email_alert.trigger_email_alerts",
-			"frappe.desk.doctype.feed.feed.update_feed"
 		],
 		"on_cancel": [
 			"frappe.desk.notifications.clear_doctype_notifications",
@@ -141,6 +111,7 @@ scheduler_events = {
 		"frappe.email.bulk.flush",
 		"frappe.email.doctype.email_account.email_account.pull",
 		"frappe.email.doctype.email_account.email_account.notify_unreplied",
+		"frappe.utils.error.collect_error_snapshots",
 	],
 	"daily": [
 		"frappe.email.bulk.clear_outbox",
@@ -168,12 +139,12 @@ get_translated_dict = {
 }
 
 sounds = [
-	{"name": "email", "src": "/assets/frappe/sounds/email.mp3"},
-	{"name": "submit", "src": "/assets/frappe/sounds/submit.mp3"},
-	{"name": "cancel", "src": "/assets/frappe/sounds/cancel.mp3"},
-	{"name": "delete", "src": "/assets/frappe/sounds/delete.mp3"},
-	{"name": "click", "src": "/assets/frappe/sounds/click.mp3"},
-	{"name": "error", "src": "/assets/frappe/sounds/error.mp3"},
+	{"name": "email", "src": "/assets/frappe/sounds/email.mp3", "volume": 0.1},
+	{"name": "submit", "src": "/assets/frappe/sounds/submit.mp3", "volume": 0.1},
+	{"name": "cancel", "src": "/assets/frappe/sounds/cancel.mp3", "volume": 0.1},
+	{"name": "delete", "src": "/assets/frappe/sounds/delete.mp3", "volume": 0.05},
+	{"name": "click", "src": "/assets/frappe/sounds/click.mp3", "volume": 0.05},
+	{"name": "error", "src": "/assets/frappe/sounds/error.mp3", "volume": 0.1},
 	# {"name": "alert", "src": "/assets/frappe/sounds/alert.mp3"},
 	# {"name": "chime", "src": "/assets/frappe/sounds/chime.mp3"},
 ]

@@ -46,13 +46,13 @@ def send(recipients=None, sender=None, subject=None, message=None, reference_doc
 	if isinstance(send_after, int):
 		send_after = add_days(nowdate(), send_after)
 
+	email_account = get_outgoing_email_account(False, append_to=reference_doctype)
 	if not sender or sender == "Administrator":
-		email_account = get_outgoing_email_account()
 		sender = email_account.default_sender
 
 	check_bulk_limit(recipients)
 
-	formatted = get_formatted_html(subject, message)
+	formatted = get_formatted_html(subject, message, email_account=email_account)
 
 	try:
 		text_content = html2text(formatted)
@@ -104,7 +104,7 @@ def send(recipients=None, sender=None, subject=None, message=None, reference_doc
 
 def add(email, sender, subject, formatted, text_content=None,
 	reference_doctype=None, reference_name=None, attachments=None, reply_to=None,
-	cc=(), message_id=None, send_after=None, bulk_priority=1):
+	cc=(), message_id=None, send_after=None, bulk_priority=1, email_account=None):
 	"""add to bulk mail queue"""
 	e = frappe.new_doc('Bulk Email')
 	e.sender = sender
@@ -113,7 +113,7 @@ def add(email, sender, subject, formatted, text_content=None,
 
 	try:
 		mail = get_email(email, sender=e.sender, formatted=formatted, subject=subject,
-			text_content=text_content, attachments=attachments, reply_to=reply_to, cc=cc)
+			text_content=text_content, attachments=attachments, reply_to=reply_to, cc=cc, email_account=email_account)
 
 		if message_id:
 			mail.set_message_id(message_id)
@@ -244,7 +244,7 @@ def flush(from_test=False):
 		from_test = True
 
 	frappe.db.sql("""update `tabBulk Email` set status='Expired'
-		where datediff(curdate(), creation) > 3""", auto_commit=auto_commit)
+		where datediff(curdate(), creation) > 3 and status='Not Sent'""", auto_commit=auto_commit)
 
 	for i in xrange(500):
 		email = frappe.db.sql("""select * from `tabBulk Email` where
@@ -260,6 +260,7 @@ def flush(from_test=False):
 		try:
 			if not from_test:
 				smtpserver.setup_email_account(email.reference_doctype)
+				smtpserver.replace_sender_in_email(email)
 				smtpserver.sess.sendmail(email["sender"], email["recipient"], encode(email["message"]))
 
 			frappe.db.sql("""update `tabBulk Email` set status='Sent' where name=%s""",
@@ -281,8 +282,9 @@ def flush(from_test=False):
 			frappe.db.sql("""update `tabBulk Email` set status='Error', error=%s
 				where name=%s""", (unicode(e), email["name"]), auto_commit=auto_commit)
 
-		finally:
-			frappe.db.commit()
+		# NOTE: removing commit here because we pass auto_commit
+		# finally:
+		# 	frappe.db.commit()
 
 def clear_outbox():
 	"""Remove mails older than 31 days in Outbox. Called daily via scheduler."""

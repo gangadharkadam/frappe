@@ -173,10 +173,14 @@ class BaseDocument(object):
 
 		return value
 
-	def get_valid_dict(self):
-		d = {}
+	def get_valid_dict(self, sanitize=True):
+		d = frappe._dict()
 		for fieldname in self.meta.get_valid_columns():
 			d[fieldname] = self.get(fieldname)
+			
+			# if no need for sanitization and value is None, continue
+			if not sanitize and d[fieldname] is None:
+				continue
 
 			df = self.meta.get_field(fieldname)
 			if df:
@@ -184,6 +188,7 @@ class BaseDocument(object):
 					d[fieldname] = cint(d[fieldname])
 
 				elif df.fieldtype in ("Currency", "Float", "Percent") and not isinstance(d[fieldname], float):
+					
 					d[fieldname] = flt(d[fieldname])
 
 				elif df.fieldtype in ("Datetime", "Date") and d[fieldname]=="":
@@ -239,11 +244,11 @@ class BaseDocument(object):
 				if k in default_fields:
 					del doc[k]
 
-		for key in ("_user_tags", "__islocal", "__onload", "_starred_by", "__run_link_triggers"):
+		for key in ("_user_tags", "__islocal", "__onload", "_liked_by", "__run_link_triggers"):
 			if self.get(key):
 				doc[key] = self.get(key)
 
-		return frappe._dict(doc)
+		return doc
 
 	def as_json(self):
 		return frappe.as_json(self.as_dict())
@@ -331,8 +336,10 @@ class BaseDocument(object):
 
 	def db_set(self, fieldname, value, update_modified=True):
 		self.set(fieldname, value)
-		self.set("modified", now())
-		self.set("modified_by", frappe.session.user)
+		if update_modified:
+			self.set("modified", now())
+			self.set("modified_by", frappe.session.user)
+
 		frappe.db.set_value(self.doctype, self.name, fieldname, value,
 			self.modified, self.modified_by, update_modified=update_modified)
 
@@ -369,6 +376,12 @@ class BaseDocument(object):
 		for df in self.meta.get("fields", {"reqd": 1}):
 			if self.get(df.fieldname) in (None, []) or not strip_html(cstr(self.get(df.fieldname))).strip():
 				missing.append((df.fieldname, get_msg(df)))
+
+		# check for missing parent and parenttype
+		if self.meta.istable:
+			for fieldname in ("parent", "parenttype"):
+				if not self.get(fieldname):
+					missing.append((fieldname, get_msg(frappe._dict(label=fieldname))))
 
 		return missing
 
@@ -554,10 +567,19 @@ class BaseDocument(object):
 		meta_df = self.meta.get_field(fieldname)
 		if meta_df and meta_df.get("__print_hide"):
 			return True
-		if df:
-			return df.print_hide
-		if meta_df:
-			return meta_df.print_hide
+
+		print_hide = 0
+
+		if self.get(fieldname)==0 and not self.meta.istable:
+			print_hide = ( df and df.print_hide_if_no_value ) or ( meta_df and meta_df.print_hide_if_no_value )
+
+		if not print_hide:
+			if df and df.print_hide is not None:
+				print_hide = df.print_hide
+			elif meta_df:
+				print_hide = meta_df.print_hide
+
+		return print_hide
 
 	def in_format_data(self, fieldname):
 		"""Returns True if shown via Print Format::`format_data` property.

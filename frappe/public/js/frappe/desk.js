@@ -70,6 +70,14 @@ frappe.Application = Class.extend({
 				frappe.csrf_token = data.csrf_token;
 			}
 		});
+
+		frappe.realtime.on("version-update", function() {
+			var dialog = frappe.msgprint(__("The application has been updated to a new version, please refresh this page"));
+			dialog.set_primary_action("Refresh", function() {
+				location.reload(true);
+			});
+			dialog.get_close_btn().toggle(false);
+		});
 	},
 
 	load_bootinfo: function() {
@@ -80,7 +88,7 @@ frappe.Application = Class.extend({
 			this.check_metadata_cache_status();
 			this.set_globals();
 			this.sync_pages();
-			moment.locale(frappe.boot.lang);
+			moment.locale("en");
 			moment.user_utc_offset = moment().utcOffset();
 			if(frappe.boot.timezone_info) {
 				moment.tz.add(frappe.boot.timezone_info);
@@ -146,7 +154,7 @@ frappe.Application = Class.extend({
 		$.each(frappe.boot.notification_info.open_count_doctype, function(doctype, count) {
 			if(count) {
 				$('.open-notification[data-doctype="'+ doctype +'"]')
-					.removeClass("hide").html(count);
+					.removeClass("hide").html(count > 99 ? "99+" : count);
 			} else {
 				$('.open-notification[data-doctype="'+ doctype +'"]')
 					.addClass("hide");

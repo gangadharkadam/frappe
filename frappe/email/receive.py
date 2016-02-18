@@ -3,7 +3,7 @@
 
 from __future__ import unicode_literals
 import time
-import _socket, poplib,imaplib
+import _socket, poplib, imaplib
 import frappe
 from frappe import _
 from frappe.utils import extract_email_id, convert_utc_to_user_timezone, now, cint, cstr, strip
@@ -17,7 +17,7 @@ class EmailTimeoutError(frappe.ValidationError): pass
 class TotalSizeExceededError(frappe.ValidationError): pass
 class LoginLimitExceeded(frappe.ValidationError): pass
 
-class POP3Server:
+class EmailServer:
 	"""Wrapper for POP server to pull emails."""
 	def __init__(self, args=None):
 		self.setup(args)
@@ -36,17 +36,19 @@ class POP3Server:
 
 	def connect(self):
 		"""Connect to **Email Account**."""
-		responce = self.connect_imap() if cint(self.settings.use_imap) else self.connect_pop()
-		return responce
+		if cint(self.settings.use_imap):
+			return self.connect_imap()
+		else:
+			return self.connect_pop()
 
 	def connect_imap(self):
-		#this method return imap connection
+		"""Connect to IMAP"""
 		try:
 			if cint(self.settings.use_ssl):
 				self.imap = Timed_IMAP4_SSL(self.settings.host, timeout=frappe.conf.get("pop_timeout"))
 			else:
 				self.imap = Timed_IMAP4(self.settings.host, timeout=frappe.conf.get("pop_timeout"))
-			self.imap.login(self.settings.username,self.settings.password)
+			self.imap.login(self.settings.username, self.settings.password)
 			# connection established!
 			return True
 
@@ -55,10 +57,10 @@ class POP3Server:
 			frappe.msgprint(_('Invalid Mail Server. Please rectify and try again.'))
 			raise
 
-		except :
-				frappe.msgprint(_('Invalid User Name or Support Password. Please rectify and try again.'))
-				raise
-	
+		except Exception, e:
+			frappe.msgprint(_('Cannot connect: {0}').format(str(e)))
+			raise
+
 	def connect_pop(self):
 		#this method return pop connection
 		try:
@@ -74,6 +76,9 @@ class POP3Server:
 			return True
 
 		except _socket.error:
+			# log performs rollback and logs error in scheduler log
+			log("receive.connect_pop")
+
 			# Invalid mail server -- due to refusing connection
 			frappe.msgprint(_('Invalid Mail Server. Please rectify and try again.'))
 			raise
@@ -100,13 +105,8 @@ class POP3Server:
 			# track if errors arised
 			self.errors = False
 			self.latest_messages = []
-			# if section code below is for imap and else part is for pop3
-			if cint(self.settings.use_imap):  
-				self.imap.select("Inbox") 
-				responce, message = self.imap.uid('search',None, "UNSEEN") # search and return Uids
-				email_list =  message[0].split()
-			else:
-				email_list = self.pop.list()[1]
+
+			email_list = self.get_new_mails()
 			num = num_copy = len(email_list)
 
 			# WARNING: Hard coded max no. of messages to be popped
@@ -117,26 +117,23 @@ class POP3Server:
 			self.max_email_size = cint(frappe.local.conf.get("max_email_size"))
 			self.max_total_size = 5 * self.max_email_size
 
-			for i, pop_meta in enumerate(email_list):
+			for i, message_meta in enumerate(email_list):
 				# do not pull more than NUM emails
 				if (i+1) > num:
 					break
 
 				try:
-					# if section code below is for imap and else part is for pop3
-					if cint(self.settings.use_imap):
-						self.retrieve_message(pop_meta)
-					else:
-						self.retrieve_message(pop_meta, i+1)
+					self.retrieve_message(message_meta, i+1)
 				except (TotalSizeExceededError, EmailTimeoutError, LoginLimitExceeded):
 					break
 
 			# WARNING: Mark as read - message number 101 onwards from the pop list
 			# This is to avoid having too many messages entering the system
 			num = num_copy
-			if num > 100 and not self.errors and not cint(self.settings.use_imap):
-				for m in xrange(101, num+1):
-					self.pop.dele(m)
+			if not cint(self.settings.use_imap):
+				if num > 100 and not self.errors:
+					for m in xrange(101, num+1):
+						self.pop.dele(m)
 
 		except Exception, e:
 			if self.has_login_limit_exceeded(e):
@@ -154,17 +151,27 @@ class POP3Server:
 
 		return self.latest_messages
 
-	def retrieve_message(self, pop_meta,msg_num=None):
+	def get_new_mails(self):
+		"""Return list of new mails"""
+		if cint(self.settings.use_imap):
+			self.imap.select("Inbox")
+			response, message = self.imap.uid('search', None, "UNSEEN")
+			email_list =  message[0].split()
+		else:
+			email_list = self.pop.list()[1]
+
+		return email_list
+
+	def retrieve_message(self, message_meta, msg_num=None):
 		incoming_mail = None
 		try:
-			self.validate_pop(pop_meta)
-			# if section code below is for imap and else part is for pop3
+			self.validate_message_limits(message_meta)
+
 			if cint(self.settings.use_imap):
-				status,message = self.imap.uid('fetch', pop_meta, '(RFC822)')
+				status, message = self.imap.uid('fetch', message_meta, '(RFC822)')
 				self.latest_messages.append(message[0][1])
 			else:
 				msg = self.pop.retr(msg_num)
-
 				self.latest_messages.append(b'\n'.join(msg[1]))
 
 		except (TotalSizeExceededError, EmailTimeoutError):
@@ -185,9 +192,15 @@ class POP3Server:
 
 				if not cint(self.settings.use_imap):
 					self.pop.dele(msg_num)
+				else:
+					# mark as seen
+					self.imap.uid('STORE', message_meta, '+FLAGS', '(\\SEEN)')
 		else:
 			if not cint(self.settings.use_imap):
 				self.pop.dele(msg_num)
+			else:
+				# mark as seen
+				self.imap.uid('STORE', message_meta, '+FLAGS', '(\\SEEN)')
 
 	def has_login_limit_exceeded(self, e):
 		return "-ERR Exceeded the login limit" in strip(cstr(e.message))
@@ -202,12 +215,12 @@ class POP3Server:
 				return True
 		return False
 
-	def validate_pop(self, pop_meta):
+	def validate_message_limits(self, message_meta):
 		# throttle based on email size
 		if not self.max_email_size:
 			return
 
-		m, size = pop_meta.split()
+		m, size = message_meta.split()
 		size = cint(size)
 
 		if size < self.max_email_size:
@@ -253,8 +266,12 @@ class Email:
 		self.set_content_and_type()
 		self.set_subject()
 
-		self.from_email = extract_email_id(self.mail["From"])
-		self.from_real_name = email.utils.parseaddr(self.mail["From"])[0]
+		# gmail mailing-list compatibility
+		# use X-Original-Sender if available, as gmail sometimes modifies the 'From'
+		_from_email = self.mail.get("X-Original-From") or self.mail["From"]
+
+		self.from_email = extract_email_id(_from_email)
+		self.from_real_name = email.utils.parseaddr(_from_email)[0]
 
 		if self.mail["Date"]:
 			utc = email.utils.mktime_tz(email.utils.parsedate_tz(self.mail["Date"]))
@@ -351,7 +368,7 @@ class Email:
 		for attachment in self.attachments:
 			try:
 				file_data = save_file(attachment['fname'], attachment['fcontent'],
-					doc.doctype, doc.name)
+					doc.doctype, doc.name, is_private=1)
 				saved_attachments.append(file_data)
 
 				if attachment['fname'] in self.cid_map:
