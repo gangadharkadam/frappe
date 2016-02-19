@@ -15,6 +15,7 @@ import frappe.utils
 from frappe.utils import cint
 from distutils.spawn import find_executable
 from functools import wraps
+from .utils import get_sites
 
 click.disable_unicode_literals_warning = True
 
@@ -908,13 +909,17 @@ def use(site, sites_path='.'):
 
 @click.command('backup')
 @click.option('--with-files', default=False, is_flag=True, help="Take backup with files")
+@click.option('--sites', help="Take backup of [all] site/s ex 'backup --with-files --sites all'")
 @pass_context
-def backup(context, with_files=False, backup_path_db=None, backup_path_files=None,
+def backup(context, with_files=False, sites=False, backup_path_db=None, backup_path_files=None,
 	backup_path_private_files=None, quiet=False):
 	"Backup"
 	from frappe.utils.backups import scheduled_backup
+	site_list=context.sites
+	if sites=='all':
+		site_list=get_sites()
 	verbose = context.verbose
-	for site in context.sites:
+	for site in site_list:
 		frappe.init(site=site)
 		frappe.connect()
 		odb = scheduled_backup(ignore_files=not with_files, backup_path_db=backup_path_db, backup_path_files=backup_path_files, backup_path_private_files=backup_path_private_files, force=True)
